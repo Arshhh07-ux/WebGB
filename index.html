@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Cyberpunk Highway Racer</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            overflow: hidden;
+            background-color: #050508;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #fff;
+            user-select: none;
+        }
+        #game-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .stat-box {
+            background: rgba(15, 23, 42, 0.75);
+            border: 2px solid #00f0ff;
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.4);
+            padding: 12px 24px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            backdrop-filter: blur(5px);
+        }
+        .stat-label {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            color: #94a3b8;
+            letter-spacing: 1px;
+        }
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: 800;
+            color: #00f0ff;
+            text-shadow: 0 0 10px rgba(0, 240, 255, 0.7);
+        }
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(5, 5, 8, 0.85);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+            backdrop-filter: blur(8px);
+        }
+        h1 {
+            font-size: 3.5rem;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            color: #ff0055;
+            text-shadow: 0 0 20px rgba(255, 0, 85, 0.8), 0 0 40px rgba(0, 240, 255, 0.5);
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        p {
+            color: #cbd5e1;
+            font-size: 1.1rem;
+            margin-bottom: 30px;
+            text-align: center;
+            max-width: 500px;
+        }
+        .btn {
+            background: linear-gradient(135deg, #ff0055, #7928ca);
+            color: #fff;
+            border: none;
+            padding: 16px 40px;
+            font-size: 1.2rem;
+            font-weight: 700;
+            border-radius: 30px;
+            cursor: pointer;
+            box-shadow: 0 0 20px rgba(255, 0, 85, 0.5);
+            transition: all 0.2s ease-in-out;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .btn:hover {
+            transform: scale(1.08);
+            box-shadow: 0 0 35px rgba(255, 0, 85, 0.9);
+        }
+        .hidden {
+            display: none !important;
+        }
+    </style>
+
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="game-container"></div>
+
+    <!-- Heads Up Display -->
+    <div id="hud">
+        <div class="stat-box">
+            <div class="stat-label">Score</div>
+            <div id="score" class="stat-value">0</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Speed</div>
+            <div id="speed" class="stat-value">120 KM/H</div>
+        </div>
+    </div>
+
+    <!-- UI Overlay -->
+    <div id="overlay">
+        <h1 id="title">CYBER RACER 3D</h1>
+        <p id="description">Use <strong>A / D</strong> or <strong>Left / Right Arrows</strong> to switch lanes. Dodge oncoming traffic on the high-speed neon highway!</p>
+        <button id="start-btn" class="btn">Drive Now</button>
+    </div>
+
+    <script>
+        // Game Constants & Setup
+        const LANES = [-3.5, 0, 3.5];
+        let currentLane = 1; // Center lane
+        let targetX = LANES[currentLane];
+        let score = 0;
+        let speed = 0.6;
+        let isGameRunning = false;
+        let obstacles = [];
+        let particles = [];
+
+        // Scene, Camera, Renderer
+        const container = document.getElementById('game-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050508, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 3, 8);
+        camera.rotation.x = -0.2;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        container.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(20, 40, 20);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        scene.add(dirLight);
+
+        // Dynamic Neon Street Lights
+        const cyanLight = new THREE.PointLight(0x00f0ff, 3, 25);
+        cyanLight.position.set(-8, 4, -20);
+        scene.add(cyanLight);
+
+        const pinkLight = new THREE.PointLight(0xff0055, 3, 25);
+        pinkLight.position.set(8, 4, -40);
+        scene.add(pinkLight);
+
+        // Building Neon Colors
+        const neonColors = [0x00f0ff, 0xff0055, 0x7928ca, 0x38bdf8, 0xfacc15];
+
+        // Player Car Creation
+        const playerGroup = new THREE.Group();
+        
+        // Car Body Material (Metallic Shiny Finish)
+        const carBodyMat = new THREE.MeshStandardMaterial({
+            color: 0x111115,
+            metalness: 0.9,
+            roughness: 0.2
+        });
+
+        // Car Base Mesh
+        const carBody = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.5, 3.2), carBodyMat);
+        carBody.position.y = 0.4;
+        carBody.castShadow = true;
+        playerGroup.add(carBody);
+
+        // Car Cabin Mesh
+        const cabin = new THREE.Mesh(
+            new THREE.BoxGeometry(1.2, 0.4, 1.6),
+            new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.1, metalness: 1.0 })
+        );
+        cabin.position.set(0, 0.7, -0.2);
+        playerGroup.add(cabin);
+
+        // Tail Lights
+        const tailLightMat = new THREE.MeshBasicMaterial({ color: 0xff0055 });
+        const tailLightLeft = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.1), tailLightMat);
+        tailLightLeft.position.set(-0.6, 0.4, 1.6);
+        const tailLightRight = tailLightLeft.clone();
+        tailLightRight.position.x = 0.6;
+        playerGroup.add(tailLightLeft);
+        playerGroup.add(tailLightRight);
+
+        // Headlights
+        const headLightMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff });
+        const headLightLeft = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.1), headLightMat);
+        headLightLeft.position.set(-0.6, 0.4, -1.6);
+        const headLightRight = headLightLeft.clone();
+        headLightRight.position.x = 0.6;
+        playerGroup.add(headLightLeft);
+        playerGroup.add(headLightRight);
+
+        // Tail Light Glowing Point Light
+        const carGlow = new THREE.PointLight(0xff0055, 2, 8);
+        carGlow.position.set(0, 0.5, 1.8);
+        playerGroup.add(carGlow);
+
+        scene.add(playerGroup);
+
+        // Infinite Track Construction
+        const roadGroup = new THREE.Group();
+        const roadMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0f, roughness: 0.8 });
+        const road = new THREE.Mesh(new THREE.PlaneGeometry(12, 400), roadMat);
+        road.rotation.x = -Math.PI / 2;
+        road.position.z = -150;
+        road.receiveShadow = true;
+        roadGroup.add(road);
+
+        // Lane Dividers
+        const laneLineMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff });
+        for (let z = 0; z > -350; z -= 10) {
+            [-1.75, 1.75].forEach(x => {
+                const line = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.02, 4), laneLineMat);
+                line.position.set(x, 0.01, z);
+                roadGroup.add(line);
+            });
+        }
+        scene.add(roadGroup);
+
+        // Cyberpunk Buildings Generator
+        const buildingGroup = new THREE.Group();
+        function createCity() {
+            for (let z = 20; z > -350; z -= 15) {
+                [-14, 14].forEach(x => {
+                    const height = 15 + Math.random() * 35;
+                    const bMat = new THREE.MeshStandardMaterial({
+                        color: 0x070710,
+                        roughness: 0.5
+                    });
+                    const bGeom = new THREE.BoxGeometry(8, height, 10);
+                    const building = new THREE.Mesh(bGeom, bMat);
+                    building.position.set(x, height / 2, z);
+
+                    // Add Neon Window Stripes
+                    const stripeColor = neonColors[Math.floor(Math.random() * neonColors.length)];
+                    const stripeMat = new THREE.MeshBasicMaterial({ color: stripeColor });
+                    const stripe = new THREE.Mesh(new THREE.BoxGeometry(8.1, 0.5, 10.1), stripeMat);
+                    stripe.position.set(x, Math.random() * height, z);
+
+                    buildingGroup.add(building);
+                    buildingGroup.add(stripe);
+                });
+            }
+        }
+        createCity();
+        scene.add(buildingGroup);
+
+        // Spawn Obstacle Vehicles
+        function spawnObstacle() {
+            const laneIdx = Math.floor(Math.random() * 3);
+            const obstacle = new THREE.Group();
+            
+            const obsMat = new THREE.MeshStandardMaterial({
+                color: neonColors[Math.floor(Math.random() * neonColors.length)],
+                roughness: 0.3,
+                metalness: 0.7
+            });
+
+            const body = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.6, 3), obsMat);
+            body.position.y = 0.4;
+            body.castShadow = true;
+            obstacle.add(body);
+
+            obstacle.position.set(LANES[laneIdx], 0, -200);
+            scene.add(obstacle);
+            obstacles.push(obstacle);
+        }
+
+        // Particle Exhaust Effect
+        function createExhaustParticle() {
+            const pGeom = new THREE.SphereGeometry(0.1, 8, 8);
+            const pMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.8 });
+            const particle = new THREE.Mesh(pGeom, pMat);
+            
+            particle.position.set(
+                playerGroup.position.x + (Math.random() - 0.5) * 0.4,
+                0.3,
+                playerGroup.position.z + 1.6
+            );
+            
+            scene.add(particle);
+            particles.push({ mesh: particle, life: 1.0 });
+        }
+
+        // Controls Logic
+        function handleKeyDown(e) {
+            if (!isGameRunning) return;
+
+            if ((e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') && currentLane > 0) {
+                currentLane--;
+            } else if ((e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') && currentLane < 2) {
+                currentLane++;
+            }
+            targetX = LANES[currentLane];
+        }
+        window.addEventListener('keydown', handleKeyDown);
+
+        // Game Loop / Animation
+        let clock = new THREE.Clock();
+        let spawnTimer = 0;
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (!isGameRunning) {
+                renderer.render(scene, camera);
+                return;
+            }
+
+            const delta = clock.getDelta();
+            spawnTimer += delta;
+
+            // Accelerate speed over time
+            speed += 0.0001;
+            score += Math.floor(speed * 10);
+            document.getElementById('score').innerText = score;
+            document.getElementById('speed').innerText = `${Math.floor(speed * 200)} KM/H`;
+
+            // Smooth Lane Interpolation
+            playerGroup.position.x += (targetX - playerGroup.position.x) * 0.15;
+            playerGroup.rotation.z = (playerGroup.position.x - targetX) * 0.08; // Steering Tilt
+            playerGroup.rotation.y = (playerGroup.position.x - targetX) * 0.04;
+
+            // Dynamic Camera Follow
+            camera.position.x = playerGroup.position.x * 0.3;
+
+            // Spawn Traffic
+            if (spawnTimer > Math.max(0.6, 2.0 - speed)) {
+                spawnObstacle();
+                spawnTimer = 0;
+            }
+
+            // Move Obstacles
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                const obs = obstacles[i];
+                obs.position.z += speed * 30 * delta + 0.3;
+
+                // Collision Detection Box
+                const distanceZ = Math.abs(obs.position.z - playerGroup.position.z);
+                const distanceX = Math.abs(obs.position.x - playerGroup.position.x);
+
+                if (distanceZ < 2.5 && distanceX < 1.2) {
+                    endGame();
+                    return;
+                }
+
+                // Remove Off-screen Obstacles
+                if (obs.position.z > 10) {
+                    scene.remove(obs);
+                    obstacles.splice(i, 1);
+                }
+            }
+
+            // Create Exhaust Particles
+            if (Math.random() > 0.3) createExhaustParticle();
+
+            // Update Particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.mesh.position.z += 0.5;
+                p.mesh.scale.multiplyScalar(0.95);
+                p.life -= delta * 2;
+                p.mesh.material.opacity = p.life;
+
+                if (p.life <= 0) {
+                    scene.remove(p.mesh);
+                    particles.splice(i, 1);
+                }
+            }
+
+            // Move Environment for Infinite Highway Illusion
+            cyanLight.position.z = (cyanLight.position.z + speed * 15 * delta) % 100 - 100;
+            pinkLight.position.z = (pinkLight.position.z + speed * 15 * delta) % 100 - 100;
+
+            renderer.render(scene, camera);
+        }
+
+        // Start / Reset Game
+        function startGame() {
+            // Clean up old obstacles
+            obstacles.forEach(obs => scene.remove(obs));
+            obstacles = [];
+            
+            // Reset Parameters
+            score = 0;
+            speed = 0.6;
+            currentLane = 1;
+            targetX = LANES[currentLane];
+            playerGroup.position.set(0, 0, 0);
+
+            document.getElementById('overlay').classList.add('hidden');
+            isGameRunning = true;
+            clock.start();
+        }
+
+        function endGame() {
+            isGameRunning = false;
+            document.getElementById('title').innerText = "CRASHED!";
+            document.getElementById('description').innerHTML = `Final Score: <strong>${score}</strong>`;
+            document.getElementById('start-btn').innerText = "Try Again";
+            document.getElementById('overlay').classList.remove('hidden');
+        }
+
+        document.getElementById('start-btn').addEventListener('click', startGame);
+
+        // Window Resize Handling
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Initialize Render Frame
+        animate();
+    </script>
+</body>
+</html>
+
